@@ -5,7 +5,6 @@ import org.springframework.lang.NonNull;
 import org.springframework.lang.Nullable;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.UUID;
 
 
@@ -15,9 +14,9 @@ import java.util.UUID;
 @Data
 public class User {
         @Nullable
-        private UUID id; // null when user is not persisted yet
-        @NonNull
-        private LocalDateTime createdAt = LocalDateTime.now(ZoneId.of("UTC")); // set on task creation
+        private UUID id;
         @NonNull
         private String name;
+        private LocalDateTime createdAt;
+
 }

@@ -40,7 +40,7 @@ public class UserPersistenceServiceImpl implements UserPersistenceService {
 
     @Override
     @NonNull
-    public Optional<User> getById(UUID id) {
+    public Optional<User> getById(@NonNull UUID id) {
         return repository.findById(id)
                 .map(mapper::fromEntity);
     }

@@ -133,7 +133,7 @@ public class TaskController {
             }
     )
     @GetMapping("/assignee/{userId}")
-    public ResponseEntity<List<TaskDto>> getByAssignee(@PathVariable UUID userId) {
+    public ResponseEntity<List<TaskDto>> getByStatus(@PathVariable UUID userId) {
         return ResponseEntity.ok(
                 taskService.getByAssignee(userId).stream()
                         .map(taskDtoMapper::fromBusiness)

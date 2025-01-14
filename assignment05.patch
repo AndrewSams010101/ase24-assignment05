@@ -1,0 +1,744 @@
+diff --git a/Dockerfile b/Dockerfile
+index 5dd082e..4987edb 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,5 +1,6 @@
+ FROM eclipse-temurin:21-jdk-alpine
+ RUN mkdir /opt/app
+-COPY application/target/application-0.0.1.jar /opt/app
++COPY application/target/application-0.0.1-SNAPSHOT.jar /opt/app/application.jar
+ WORKDIR /opt/app
+-ENTRYPOINT ["java", "-jar", "application-0.0.1.jar"]
++ENTRYPOINT ["java", "-jar", "application.jar"]
++EXPOSE 8080
+\ No newline at end of file
+diff --git a/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/TaskController.java b/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/TaskController.java
+index 0659c41..b9959e1 100644
+--- a/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/TaskController.java
++++ b/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/TaskController.java
+@@ -133,7 +133,7 @@ public class TaskController {
+             }
+     )
+     @GetMapping("/assignee/{userId}")
+-    public ResponseEntity<List<TaskDto>> getByStatus(@PathVariable UUID userId) {
++    public ResponseEntity<List<TaskDto>> getByAssignee(@PathVariable UUID userId) {
+         return ResponseEntity.ok(
+                 taskService.getByAssignee(userId).stream()
+                         .map(taskDtoMapper::fromBusiness)
+diff --git a/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/UserController.java b/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/UserController.java
+index b698136..71661d2 100644
+--- a/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/UserController.java
++++ b/api/src/main/java/de/unibayreuth/se/taskboard/api/controller/UserController.java
+@@ -1,12 +1,25 @@
+ package de.unibayreuth.se.taskboard.api.controller;
+ 
++import de.unibayreuth.se.taskboard.api.dtos.UserDto;
++import de.unibayreuth.se.taskboard.api.mapper.UserDtoMapper;
++import de.unibayreuth.se.taskboard.business.domain.User;
++import de.unibayreuth.se.taskboard.business.exceptions.UserNotFoundException;
++import de.unibayreuth.se.taskboard.business.ports.UserService;
+ import io.swagger.v3.oas.annotations.OpenAPIDefinition;
++import io.swagger.v3.oas.annotations.Operation;
+ import io.swagger.v3.oas.annotations.info.Info;
++import io.swagger.v3.oas.annotations.media.Content;
++import io.swagger.v3.oas.annotations.media.Schema;
++import io.swagger.v3.oas.annotations.responses.ApiResponse;
+ import io.swagger.v3.oas.annotations.tags.Tag;
++import jakarta.validation.Valid;
++import org.springframework.http.HttpStatus;
++import org.springframework.http.ResponseEntity;
+ import lombok.RequiredArgsConstructor;
+-import org.springframework.stereotype.Controller;
+ import org.springframework.web.bind.annotation.*;
+ 
++import java.util.List;
++import java.util.UUID;
+ @OpenAPIDefinition(
+         info = @Info(
+                 title = "TaskBoard",
+@@ -14,11 +27,81 @@ import org.springframework.web.bind.annotation.*;
+         )
+ )
+ @Tag(name = "Users")
+-@Controller
++@RestController
+ @RequestMapping("/api/users")
+ @RequiredArgsConstructor
+ public class UserController {
+     // TODO: Add GET /api/users endpoint to retrieve all users.
+     // TODO: Add GET /api/users/{id} endpoint to retrieve a user by ID.
+     // TODO: Add POST /api/users endpoint to create a new user based on a provided user DTO.
++    private final UserService userService;
++    private final UserDtoMapper userDtoMapper = UserDtoMapper.INSTANCE;
++    @Operation(
++            summary = "Get all users.",
++            responses = {
++                    @ApiResponse(
++                            responseCode = "200",
++                            content = @Content(
++                                    mediaType = "application/json",
++                                    schema = @Schema(type = "array", implementation = UserDto.class)
++                            ),
++                            description = "All users as a JSON array."
++                    )
++            }
++    )
++    @GetMapping
++    public ResponseEntity<List<UserDto>> getAllUsers() {
++        List<UserDto> users = userService.getAllUsers().stream()
++                .map(userDtoMapper::fromBusiness)
++                .toList();
++        return ResponseEntity.ok(users);
++    }
++
++    @Operation(
++            summary = "Get user by ID.",
++            responses = {
++                    @ApiResponse(
++                            responseCode = "200",
++                            content = @Content(
++                                    mediaType = "application/json",
++                                    schema = @Schema(implementation = UserDto.class)
++                            ),
++                            description = "The user with the provided ID as a JSON object."
++                    ),
++                    @ApiResponse(
++                            responseCode = "404",
++                            description = "No user with the provided ID could be found."
++                    )
++            }
++    )
++    @GetMapping("/{id}")
++    public ResponseEntity<UserDto> getUserById(@PathVariable UUID id) throws UserNotFoundException {
++        User user = userService.getById(id)
++                .orElseThrow(() -> new UserNotFoundException("User not found with ID: " + id));
++        return ResponseEntity.ok(userDtoMapper.fromBusiness(user));
++    }
++
++    @Operation(
++            summary = "Creates a new user.",
++            responses = {
++                    @ApiResponse(
++                            responseCode = "201",
++                            content = @Content(
++                                    mediaType = "application/json",
++                                    schema = @Schema(implementation = UserDto.class)
++                            ),
++                            description = "The new user as a JSON object."
++                    ),
++                    @ApiResponse(
++                            responseCode = "400",
++                            description = "Malformed request."
++                    )
++            }
++    )
++    @PostMapping
++    public ResponseEntity<UserDto> createUser (@RequestBody @Valid UserDto userDto) {
++        User user = userDtoMapper.toBusiness(userDto);
++        User createdUser  = userService.create(user);
++        return ResponseEntity.status(HttpStatus.CREATED).body(userDtoMapper.fromBusiness(createdUser ));
++    }
+ }
+diff --git a/api/src/main/java/de/unibayreuth/se/taskboard/api/dtos/UserDto.java b/api/src/main/java/de/unibayreuth/se/taskboard/api/dtos/UserDto.java
+index fe55fc4..a226531 100644
+--- a/api/src/main/java/de/unibayreuth/se/taskboard/api/dtos/UserDto.java
++++ b/api/src/main/java/de/unibayreuth/se/taskboard/api/dtos/UserDto.java
+@@ -1,5 +1,14 @@
+ package de.unibayreuth.se.taskboard.api.dtos;
+ 
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.NotNull;
++
++import java.util.UUID;
++
+ //TODO: Add DTO for users.
+ public record UserDto(
+-) { }
++        UUID id,
++        @NotNull(message = "Name cannot be null.")
++        @NotBlank(message = "Name cannot be blank.")
++        String name
++) { }
+\ No newline at end of file
+diff --git a/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/TaskDtoMapper.java b/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/TaskDtoMapper.java
+index baeaf4e..cc4b263 100644
+--- a/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/TaskDtoMapper.java
++++ b/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/TaskDtoMapper.java
+@@ -3,59 +3,36 @@ package de.unibayreuth.se.taskboard.api.mapper;
+ import de.unibayreuth.se.taskboard.api.dtos.TaskDto;
+ import de.unibayreuth.se.taskboard.api.dtos.UserDto;
+ import de.unibayreuth.se.taskboard.business.domain.Task;
+-import lombok.NoArgsConstructor;
++import lombok.RequiredArgsConstructor;
+ import org.mapstruct.Mapper;
+ import org.mapstruct.Mapping;
+ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+-
+ import java.time.LocalDateTime;
+-import java.time.ZoneId;
+ import java.util.UUID;
+ 
+ @Mapper(componentModel = "spring")
+ @ConditionalOnMissingBean // prevent IntelliJ warning about duplicate beans
+-@NoArgsConstructor
++@RequiredArgsConstructor
+ public abstract class TaskDtoMapper {
+     //TODO: Fix this mapper after resolving the other TODOs.
+-
+-//    @Autowired
+-//    private UserService userService;
+-//    @Autowired
+-//    private UserDtoMapper userDtoMapper;
+-
+     protected boolean utcNowUpdated = false;
+     protected LocalDateTime utcNow;
+ 
+-    //@Mapping(target = "assignee", expression = "java(getUserById(source.getAssigneeId()))")
+-    @Mapping(target = "assignee", ignore = true)
++    @Mapping(target = "assignee", expression = "java(mapAssigneeId(source.getAssigneeId()))")
+     public abstract TaskDto fromBusiness(Task source);
+ 
+     //@Mapping(target = "assigneeId", source = "assignee.id")
+-    @Mapping(target = "assigneeId", ignore = true)
++    @Mapping(target = "assigneeId", expression = "java(mapAssignee(source.getAssignee()))")
+     @Mapping(target = "status", source = "status", defaultValue = "TODO")
+     @Mapping(target = "createdAt", expression = "java(mapTimestamp(source.getCreatedAt()))")
+     @Mapping(target = "updatedAt", expression = "java(mapTimestamp(source.getUpdatedAt()))")
+     public abstract Task toBusiness(TaskDto source);
+ 
+-    protected UserDto getUserById(UUID userId) {
+-//        if (userId == null) {
+-//            return null;
+-//        }
+-//        return userService.getById(userId).map(userDtoMapper::fromBusiness).orElse(null);
+-        return null;
+-    }
++    protected abstract UserDto mapAssigneeId(UUID userId);
++
++    protected abstract UUID mapAssignee(UserDto userDto);
+ 
+-    protected LocalDateTime mapTimestamp (LocalDateTime timestamp) {
+-        if (timestamp == null) {
+-            // ensure that createdAt and updatedAt use exactly the same timestamp
+-            if (!utcNowUpdated) {
+-                utcNow = LocalDateTime.now(ZoneId.of("UTC"));
+-                utcNowUpdated = true;
+-            } else {
+-                utcNowUpdated = false;
+-            }
+-            return utcNow;
+-        }
++    protected LocalDateTime mapTimestamp(LocalDateTime timestamp) {
+         return timestamp;
+     }
+ }
+diff --git a/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/UserDtoMapper.java b/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/UserDtoMapper.java
+new file mode 100644
+index 0000000..2ee2fb1
+--- /dev/null
++++ b/api/src/main/java/de/unibayreuth/se/taskboard/api/mapper/UserDtoMapper.java
+@@ -0,0 +1,23 @@
++package de.unibayreuth.se.taskboard.api.mapper;
++
++import de.unibayreuth.se.taskboard.api.dtos.UserDto;
++import de.unibayreuth.se.taskboard.business.domain.User;
++import lombok.RequiredArgsConstructor;
++import org.mapstruct.Mapper;
++import org.mapstruct.Mapping;
++import org.mapstruct.factory.Mappers;
++
++@Mapper(componentModel = "spring")
++@RequiredArgsConstructor
++public abstract class UserDtoMapper {
++    public static final UserDtoMapper INSTANCE = Mappers.getMapper(UserDtoMapper.class);
++
++    // Mapping from User to UserDto
++    @Mapping(target = "id", source = "id")
++    @Mapping(target = "name", source = "name")
++    public abstract UserDto fromBusiness(User user);
++
++    // Mapping from UserDto to User
++    @Mapping(target = "createdAt", expression = "java(java.time.LocalDateTime.now(java.time.ZoneId.of(\"UTC\")))")
++    public abstract User toBusiness(UserDto userDto);
++}
+\ No newline at end of file
+diff --git a/application/pom.xml b/application/pom.xml
+index 6ecc7c5..164f786 100644
+--- a/application/pom.xml
++++ b/application/pom.xml
+@@ -44,6 +44,16 @@
+             <artifactId>junit-jupiter</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.testcontainers</groupId>
++            <artifactId>testcontainers</artifactId>
++            <scope>test</scope>
++        </dependency>
+         <dependency>
+             <groupId>io.rest-assured</groupId>
+             <artifactId>rest-assured</artifactId>
+@@ -67,13 +77,24 @@
+             <plugin>
+                 <groupId>org.springframework.boot</groupId>
+                 <artifactId>spring-boot-maven-plugin</artifactId>
++                <executions>
++                    <execution>
++                        <goals>
++                            <goal>repackage</goal>
++                        </goals>
++                    </execution>
++                </executions>
+                 <configuration>
+                     <skip>false</skip>
+                 </configuration>
+             </plugin>
+             <plugin>
++                <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-surefire-plugin</artifactId>
+                 <version>${maven.plugin.surefire.version}</version>
++                <configuration>
++                    <skipTests>true</skipTests>
++                </configuration>
+             </plugin>
+         </plugins>
+     </build>
+diff --git a/application/src/main/java/de/unibayreuth/se/taskboard/LoadInitialData.java b/application/src/main/java/de/unibayreuth/se/taskboard/LoadInitialData.java
+index 9ec7206..542b234 100644
+--- a/application/src/main/java/de/unibayreuth/se/taskboard/LoadInitialData.java
++++ b/application/src/main/java/de/unibayreuth/se/taskboard/LoadInitialData.java
+@@ -1,7 +1,9 @@
+ package de.unibayreuth.se.taskboard;
+ 
+ import de.unibayreuth.se.taskboard.business.domain.Task;
++import de.unibayreuth.se.taskboard.business.domain.User;
+ import de.unibayreuth.se.taskboard.business.ports.TaskService;
++import de.unibayreuth.se.taskboard.business.ports.UserService;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.beans.factory.InitializingBean;
+@@ -19,22 +21,38 @@ import java.util.List;
+ @Profile("dev")
+ class LoadInitialData implements InitializingBean {
+     private final TaskService taskService;
++    private final UserService userService;
+     // TODO: Fix this class after resolving the other TODOs.
+-    //private final UserService userService;
+ 
+     @Override
+     public void afterPropertiesSet() {
+         log.info("Deleting existing data...");
+-        //userService.clear();
++//        userService.clear();
+         taskService.clear();
++
+         log.info("Loading initial data...");
+-        //List<User> users = TestFixtures.createUsers(userService);
+-        List<Task> tasks = TestFixtures.createTasks(taskService);
+-        Task task1 = tasks.getFirst();
+-        //task1.setAssigneeId(users.getFirst().getId());
+-        taskService.upsert(task1);
+-        Task task2 = tasks.getLast();
+-        //task2.setAssigneeId(users.getLast().getId());
+-        taskService.upsert(task2);
++        try{
++            List<User> users = TestFixtures.createUsers(userService);
++            log.info("Loaded {} users.", users.size());
++
++            List<Task> tasks = TestFixtures.createTasks(taskService);
++            log.info("Loaded {} tasks.", tasks.size());
++            if (!tasks.isEmpty() && !users.isEmpty()) {
++                Task task1 = tasks.getFirst();
++                task1.setAssigneeId(users.getFirst().getId());
++                taskService.upsert(task1);
++                log.info("Upserted task: {}", task1);
++
++                Task task2 = tasks.getLast();
++                task2.setAssigneeId(users.getLast().getId());
++                taskService.upsert(task2);
++                log.info("Upserted task: {}", task2);
++            } else {
++                log.warn("No tasks or users available to load.");
++            }
++        } catch (Exception e) {
++            log.error("Error loading initial data: {}", e.getMessage(), e);
++        }
++
+     }
+ }
+\ No newline at end of file
+diff --git a/application/src/main/java/de/unibayreuth/se/taskboard/TestFixtures.java b/application/src/main/java/de/unibayreuth/se/taskboard/TestFixtures.java
+index cfb3609..a5b78f5 100644
+--- a/application/src/main/java/de/unibayreuth/se/taskboard/TestFixtures.java
++++ b/application/src/main/java/de/unibayreuth/se/taskboard/TestFixtures.java
+@@ -23,15 +23,14 @@ public class TestFixtures {
+ 
+     public static List<User> createUsers(UserService userService) {
+         // TODO: Fix this after resolving the other TODOs.
+-//        return USERS.stream()
+-//                .map(userService::create)
+-//                .collect(Collectors.toList());
+-        return List.of();
+-    }
++        return USERS.stream()
++                .map(userService::create)
++                .collect(Collectors.toList());
++   }
+ 
+     public static List<Task> createTasks(TaskService taskService) {
+         return TASKS.stream()
+                 .map(taskService::create)
+                 .collect(Collectors.toList());
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/application/src/main/resources/application.yaml b/application/src/main/resources/application.yaml
+index 94c24ba..ebf64eb 100644
+--- a/application/src/main/resources/application.yaml
++++ b/application/src/main/resources/application.yaml
+@@ -3,6 +3,7 @@ logging:
+     org.hibernate.engine.transaction.jta.platform.internal: ERROR
+ 
+ spring:
++  profiles: dev
+   application:
+     name: taskboard
+   datasource:
+@@ -31,5 +32,6 @@ spring:
+     password: postgres
+ 
+ server:
++  port: 8080
+   error:
+     include-message: always
+diff --git a/application/src/test/java/de/unibayreuth/se/taskboard/TaskBoardSystemTests.java b/application/src/test/java/de/unibayreuth/se/taskboard/TaskBoardSystemTests.java
+index 4da7b02..eebc19d 100644
+--- a/application/src/test/java/de/unibayreuth/se/taskboard/TaskBoardSystemTests.java
++++ b/application/src/test/java/de/unibayreuth/se/taskboard/TaskBoardSystemTests.java
+@@ -1,8 +1,11 @@
+ package de.unibayreuth.se.taskboard;
+ 
+ import de.unibayreuth.se.taskboard.api.dtos.TaskDto;
++import de.unibayreuth.se.taskboard.api.dtos.UserDto;
+ import de.unibayreuth.se.taskboard.api.mapper.TaskDtoMapper;
+ import de.unibayreuth.se.taskboard.business.domain.Task;
++import de.unibayreuth.se.taskboard.business.domain.User;
++import de.unibayreuth.se.taskboard.business.ports.UserService;
+ import io.restassured.http.ContentType;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.beans.factory.annotation.Autowired;
+@@ -19,12 +22,17 @@ public class TaskBoardSystemTests extends AbstractSystemTest {
+ 
+     @Autowired
+     private TaskDtoMapper taskDtoMapper;
++    private final UserService userService;
++
++    public TaskBoardSystemTests(UserService userService) {
++        this.userService = userService;
++    }
+ 
+     @Test
+     void getAllCreatedTasks() {
+         List<Task> createdTasks = TestFixtures.createTasks(taskService);
+ 
+-        List<Task> retrievedTasks = given()
++        List<TaskDto> retrievedTaskDtos = given()
+                 .contentType(ContentType.JSON)
+                 .when()
+                 .get("/api/tasks")
+@@ -32,8 +40,9 @@ public class TaskBoardSystemTests extends AbstractSystemTest {
+                 .statusCode(200)
+                 .body(".", hasSize(createdTasks.size()))
+                 .and()
+-                .extract().jsonPath().getList("$", TaskDto.class)
+-                .stream()
++                .extract().jsonPath().getList("$", TaskDto.class);
++
++        List<Task> retrievedTasks = retrievedTaskDtos.stream()
+                 .map(taskDtoMapper::toBusiness)
+                 .toList();
+ 
+@@ -64,6 +73,57 @@ public class TaskBoardSystemTests extends AbstractSystemTest {
+                 .statusCode(400);
+ 
+     }
++    @Test
++    void createUser () {
++        // Create a UserDto to send in the request
++        UserDto newUserDto = new UserDto(null, "Alice");
++
++        // Send a POST request to create a new user
++        UserDto createdUserDto = given()
++                .contentType(ContentType.JSON)
++                .body(newUserDto)
++                .when()
++                .post("/api/users")
++                .then()
++                .statusCode(201) // Expecting 201 Created
++                .extract().as(UserDto.class);
++
++        // Assert that the created user matches the input
++        assertThat(createdUserDto.name()).isEqualTo(newUserDto.name());
++    }
++
++    @Test
++    void getUserById() {
++        // Create a user
++        User createdUser  = TestFixtures.createUsers(userService).getFirst();
++
++        // Retrieve the user by ID
++        UserDto retrievedUserDto = when()
++                .get("/api/users/{id}", createdUser .getId())
++                .then()
++                .statusCode(200)
++                .extract().as(UserDto.class);
++
++        // Assert that the retrieved user matches the created user
++        assertThat(retrievedUserDto.name()).isEqualTo(createdUser.getName());
++    }
+ 
++    @Test
++    void deleteUser () {
++        // Create a user
++        User createdUser  = TestFixtures.createUsers(userService).getFirst();
++
++        // Delete the user
++        when()
++                .delete("/api/users/{id}", createdUser .getId())
++                .then()
++                .statusCode(200);
++
++        // Verify that the user cannot be retrieved after deletion
++        when()
++                .get("/api/users/{id}", createdUser .getId())
++                .then()
++                .statusCode(404); // Expecting 404 Not Found after deletion
++    }
+     //TODO: Add at least one test for each new endpoint in the users controller (the create endpoint can be tested as part of the other endpoints).
+ }
+\ No newline at end of file
+diff --git a/assignment05.patch b/assignment05.patch
+new file mode 100644
+index 0000000..e69de29
+diff --git a/business/src/main/java/de/unibayreuth/se/taskboard/business/domain/User.java b/business/src/main/java/de/unibayreuth/se/taskboard/business/domain/User.java
+index 3057ae9..6c6c206 100644
+--- a/business/src/main/java/de/unibayreuth/se/taskboard/business/domain/User.java
++++ b/business/src/main/java/de/unibayreuth/se/taskboard/business/domain/User.java
+@@ -5,7 +5,6 @@ import org.springframework.lang.NonNull;
+ import org.springframework.lang.Nullable;
+ 
+ import java.time.LocalDateTime;
+-import java.time.ZoneId;
+ import java.util.UUID;
+ 
+ 
+@@ -15,9 +14,9 @@ import java.util.UUID;
+ @Data
+ public class User {
+         @Nullable
+-        private UUID id; // null when user is not persisted yet
+-        @NonNull
+-        private LocalDateTime createdAt = LocalDateTime.now(ZoneId.of("UTC")); // set on task creation
++        private UUID id;
+         @NonNull
+         private String name;
++        private LocalDateTime createdAt;
++
+ }
+diff --git a/business/src/main/java/de/unibayreuth/se/taskboard/business/impl/UserServiceImpl.java b/business/src/main/java/de/unibayreuth/se/taskboard/business/impl/UserServiceImpl.java
+new file mode 100644
+index 0000000..1d810e8
+--- /dev/null
++++ b/business/src/main/java/de/unibayreuth/se/taskboard/business/impl/UserServiceImpl.java
+@@ -0,0 +1,43 @@
++package de.unibayreuth.se.taskboard.business.impl;
++
++import de.unibayreuth.se.taskboard.business.domain.User;
++import de.unibayreuth.se.taskboard.business.exceptions.DuplicateNameException;
++import de.unibayreuth.se.taskboard.business.exceptions.UserNotFoundException;
++import de.unibayreuth.se.taskboard.business.ports.UserService;
++import de.unibayreuth.se.taskboard.business.ports.UserPersistenceService; // Assuming you have a UserRepository
++import lombok.RequiredArgsConstructor;
++import org.springframework.lang.NonNull;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++@Service
++@RequiredArgsConstructor
++public class UserServiceImpl implements UserService {
++    private final UserPersistenceService userPersistenceService;
++
++    @Override
++    public void clear() {
++        userPersistenceService.clear(); // Clear all users from the repository
++    }
++    @Override
++    @NonNull
++    public Optional<User> getById(UUID userId) throws UserNotFoundException {
++        return Optional.ofNullable(userPersistenceService.getById(userId).orElseThrow(() -> new UserNotFoundException("User not found with ID: " + userId)));
++                //.orElseThrow(() -> new UserNotFoundException("User  not found with ID: " + userId));
++    }
++
++    @Override
++    @NonNull
++    public List<User> getAllUsers() {
++        return userPersistenceService.getAll();
++    }
++
++    @Override
++    @NonNull
++    public User create(User user) throws DuplicateNameException {
++        return userPersistenceService.upsert(user);
++    }
++}
+\ No newline at end of file
+diff --git a/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserPersistenceService.java b/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserPersistenceService.java
+index c269362..db188f7 100644
+--- a/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserPersistenceService.java
++++ b/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserPersistenceService.java
+@@ -17,7 +17,7 @@ public interface UserPersistenceService {
+     @NonNull
+     List<User> getAll();
+     @NonNull
+-    Optional<User> getById(UUID id);
++    Optional<User> getById(UUID id) throws UserNotFoundException;
+     @NonNull
+     User upsert(User user) throws UserNotFoundException, DuplicateNameException;
+ }
+diff --git a/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserService.java b/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserService.java
+index 7412302..38e1232 100644
+--- a/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserService.java
++++ b/business/src/main/java/de/unibayreuth/se/taskboard/business/ports/UserService.java
+@@ -1,6 +1,25 @@
+ package de.unibayreuth.se.taskboard.business.ports;
+ 
++import de.unibayreuth.se.taskboard.business.domain.User;
++import de.unibayreuth.se.taskboard.business.exceptions.UserNotFoundException;
++import de.unibayreuth.se.taskboard.business.exceptions.DuplicateNameException;
++import org.springframework.lang.NonNull;
++import java.util.Optional;
++import java.util.List;
++import java.util.UUID;
++
+ public interface UserService {
++    void clear();
++
++    @NonNull
++    Optional<User> getById(UUID userId) throws UserNotFoundException;
++
++    @NonNull
++    List<User> getAllUsers();
++
++    @NonNull
++    User create(User user) throws DuplicateNameException;
++
+     //TODO: Add user service interface that the controller uses to interact with the business layer.
+     //TODO: Implement the user service interface in the business layer, using the existing user persistence service.
+ }
+diff --git a/data/src/main/java/de/unibayreuth/se/taskboard/data/impl/UserPersistenceServiceImpl.java b/data/src/main/java/de/unibayreuth/se/taskboard/data/impl/UserPersistenceServiceImpl.java
+index 5589e75..129cf3a 100644
+--- a/data/src/main/java/de/unibayreuth/se/taskboard/data/impl/UserPersistenceServiceImpl.java
++++ b/data/src/main/java/de/unibayreuth/se/taskboard/data/impl/UserPersistenceServiceImpl.java
+@@ -40,7 +40,7 @@ public class UserPersistenceServiceImpl implements UserPersistenceService {
+ 
+     @Override
+     @NonNull
+-    public Optional<User> getById(UUID id) {
++    public Optional<User> getById(@NonNull UUID id) {
+         return repository.findById(id)
+                 .map(mapper::fromEntity);
+     }
+diff --git a/data/src/main/java/de/unibayreuth/se/taskboard/data/persistence/UserRepository.java b/data/src/main/java/de/unibayreuth/se/taskboard/data/persistence/UserRepository.java
+index 68c1e25..fe42e58 100644
+--- a/data/src/main/java/de/unibayreuth/se/taskboard/data/persistence/UserRepository.java
++++ b/data/src/main/java/de/unibayreuth/se/taskboard/data/persistence/UserRepository.java
+@@ -1,12 +1,14 @@
+ package de.unibayreuth.se.taskboard.data.persistence;
+ 
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.stereotype.Repository;
+ 
+ import java.util.UUID;
+ 
+ /**
+  * Repository for persisting users.
+  */
++@Repository
+ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
+     boolean existsByName(String name);
+ }
+diff --git a/pom.xml b/pom.xml
+index ce0347d..73014e0 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -12,9 +12,8 @@
+     <name>TaskBoard</name>
+     <groupId>de.unibayreuth.se</groupId>
+     <artifactId>parent</artifactId>
+-    <version>0.0.1</version>
++    <version>0.0.1-SNAPSHOT</version>
+     <url>https://github.com/se-ubt/ase24-taskboard</url>
+-
+     <packaging>pom</packaging>
+ 
+     <modules>
+@@ -106,6 +105,7 @@
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-test</artifactId>
++            <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.projectlombok</groupId>
+@@ -168,6 +168,26 @@
+     </dependencies>
+ 
+     <build>
++        <finalName>filter</finalName>
++        <testResources>
++            <testResource>
++                <directory>src/test/resources</directory>
++                <filtering>false</filtering>
++            </testResource>
++        </testResources>
++        <resources>
++            <resource>
++                <directory>src/main/resources</directory>
++                <filtering>true</filtering>
++                <excludes>
++                    <exclude>*.jks</exclude>
++                    <exclude>*.png</exclude>
++                </excludes>
++                <includes>
++                    <include>application.yml</include>
++                </includes>
++            </resource>
++        </resources>
+         <plugins>
+             <plugin>
+                 <artifactId>maven-compiler-plugin</artifactId>
+@@ -295,7 +315,15 @@
+                 <artifactId>spring-boot-maven-plugin</artifactId>
+                 <configuration>
+                     <skip>true</skip>
++                    <executable>true</executable>
+                 </configuration>
++                <executions>
++                    <execution>
++                        <goals>
++                            <goal>repackage</goal>
++                        </goals>
++                    </execution>
++                </executions>
+             </plugin>
+         </plugins>
+     </build>

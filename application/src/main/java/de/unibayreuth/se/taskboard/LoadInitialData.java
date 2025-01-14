@@ -24,12 +24,12 @@ class LoadInitialData implements InitializingBean {
     private final UserService userService;
     // TODO: Fix this class after resolving the other TODOs.
 
+
     @Override
     public void afterPropertiesSet() {
         log.info("Deleting existing data...");
-//        userService.clear();
+        userService.clear();
         taskService.clear();
-
         log.info("Loading initial data...");
         try{
             List<User> users = TestFixtures.createUsers(userService);
@@ -53,6 +53,5 @@ class LoadInitialData implements InitializingBean {
         } catch (Exception e) {
             log.error("Error loading initial data: {}", e.getMessage(), e);
         }
-
     }
 }

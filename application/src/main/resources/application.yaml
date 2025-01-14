@@ -3,7 +3,6 @@ logging:
     org.hibernate.engine.transaction.jta.platform.internal: ERROR
 
 spring:
-  profiles: dev
   application:
     name: taskboard
   datasource:
@@ -32,6 +31,5 @@ spring:
     password: postgres
 
 server:
-  port: 8080
   error:
     include-message: always

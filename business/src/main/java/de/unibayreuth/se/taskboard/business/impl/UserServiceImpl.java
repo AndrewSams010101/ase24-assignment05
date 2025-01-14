@@ -13,8 +13,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-@Service
+
 @RequiredArgsConstructor
+@Service
 public class UserServiceImpl implements UserService {
     private final UserPersistenceService userPersistenceService;
 
@@ -24,9 +25,9 @@ public class UserServiceImpl implements UserService {
     }
     @Override
     @NonNull
-    public Optional<User> getById(UUID userId) throws UserNotFoundException {
+    public Optional<User> getById(UUID userId) {
         return Optional.ofNullable(userPersistenceService.getById(userId).orElseThrow(() -> new UserNotFoundException("User not found with ID: " + userId)));
-                //.orElseThrow(() -> new UserNotFoundException("User  not found with ID: " + userId));
+        //.orElseThrow(() -> new UserNotFoundException("User  not found with ID: " + userId));
     }
 
     @Override
